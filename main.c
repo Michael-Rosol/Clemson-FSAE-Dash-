@@ -19,10 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-//Look at this piece of code and fix your code
-/* HAL_StatusTypeDef HAL_FDCAN_ActivateNotification(FDCAN_HandleTypeDef *hfdcan, uint32_t ActiveITs,
-                                                 uint32_t BufferIndexes)*/
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -62,16 +58,11 @@ static void MX_FDCAN1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-CAN_TxHeaderTypeDef TxHeader;
-CAN_RxHeaderTypeDef RxHeader;
-
-uint8_t TxData[8];
-uint8_t RxData[8];
-
-uint32_t TxMailbox; //code is not needed 
+//
+//uint32_t TxMailbox; //code is not needed
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_PIN){
-	if (GPIO_Pin == GPIO_PIN_13){
+	if (GPIO_PIN == GPIO_PIN_13){
 		TxData[0] = 100; // 100 ms delay
 		TxData[1] = 10; // loop repeat 10 times
 
@@ -80,10 +71,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_PIN){
 }
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs){
-	
-	HAL_FDCAN_GetRxMessage(hfdcan1, FDCAN_Rx_Fifo0, &RxHeade, RxData); 
-	if (RxHeader.DLC == 2){
-		datacheck = 1; 
+
+//	HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef, FDCAN_RX_FIFO0, &RxHeader, RxData);
+	HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData);
+	if (RxHeader.DataLength == FDCAN_DLC_BYTES_2){
+		// If the message is for LED blink, process it
+		        if (RxData[0] == 1) { // Check command
+		            datacheck = 1; // Set flag to indicate to blink LED
+		        }
 	}
 }
 /* USER CODE END 0 */
@@ -122,15 +117,17 @@ int main(void)
   MX_GPIO_Init();
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_CAN_Start(&hcan1);
+  HAL_FDCAN_Start(&hfdcan1);
 
   // Activation notification:
-  HAL_FDCAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
 
-  TxHeader.DLC = 2;
-  TxHeader.IDE = CAN_ID_STD;
-  TxHeader.RTR = CAN_RTR_DATA;
-  TxHeader.StdId = 0x446; // Maybe have to change to 223zg
+  // DLC = Data Length Code
+
+  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+//  TxHeader.RTR = FDCAN_NO_RTR; FDCAN does not utilize Remote Transmission Request
+  TxHeader.Identifier = 0x123; // This is the 11 bit Identifer
 
   /* USER CODE END 2 */
 
@@ -141,11 +138,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  
+
+	  // RxData[1] takes the number passed from Tx[1]
 	  if (datacheck){
 		  for (int i = 0; i <= RxData[1]; i++){
-			  HAL_GPIO_TogglePin(GPIOA, )
+			  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+			  HAL_Delay(RxData[0]); // takes the number passed from Tx[0]
 		  }
+		  datacheck = 0;
 	  }
   }
   /* USER CODE END 3 */
@@ -173,19 +173,18 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
-  RCC_OscInitStruct.HSICalibrationValue = 64;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 17;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 1;
+  RCC_OscInitStruct.PLL.PLLN = 28;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 5;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
-  RCC_OscInitStruct.PLL.PLLFRACN = 1536;
+  RCC_OscInitStruct.PLL.PLLFRACN = 1024;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -231,10 +230,10 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 55;
+  hfdcan1.Init.NominalPrescaler = 6;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 2;
-  hfdcan1.Init.NominalTimeSeg2 = 2;
+  hfdcan1.Init.NominalTimeSeg1 = 10;
+  hfdcan1.Init.NominalTimeSeg2 = 4;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
@@ -258,6 +257,17 @@ static void MX_FDCAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN1_Init 2 */
+
+  FDCAN_FilterTypeDef fdcanfilterconfig;
+
+  fdcanfilterconfig.IdType = FDCAN_STANDARD_ID; // Use standard ID
+  fdcanfilterconfig.FilterIndex = 0; // First filter
+  fdcanfilterconfig.FilterType = FDCAN_FILTER_MASK; // Configure as mask filter
+  fdcanfilterconfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0; // Route to RX FIFO 0
+  fdcanfilterconfig.FilterID1 = 0x123; // ID of messages to receive (must match TxHeader.Identifier)
+  fdcanfilterconfig.FilterID2 = 0x7FF; // Mask, to accept the specified ID
+
+  HAL_FDCAN_ConfigFilter(&hfdcan1, &fdcanfilterconfig);
 
   /* USER CODE END FDCAN1_Init 2 */
 
