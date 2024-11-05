@@ -40,47 +40,59 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
-FDCAN_HandleTypeDef hfdcan1;
+//CAN_HandleTypeDef hcan1;
 
 /* USER CODE BEGIN PV */
+CAN_HandleTypeDef hcan1;
+CAN_TxHeaderTypeDef TxHeader;
+CAN_RxHeaderTypeDef RxHeader;
+uint32_t TxMailbox1[4];
+uint32_t TxMailbox;
+uint8_t RxData[8];
+uint8_t TxData[8];
+
+/*
+ * Okay, I did not realize that both of the boards did
+ * not have external crystals. So the best course of action would be to
+ * configure the clock of the F446RE as HSI.
+ * Then for the H723 I should configure the ST-Link V3 just like your guide
+ * and then use Bypass clock source. 
+ */
+
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MPU_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_FDCAN1_Init(void);
+static void MX_CAN1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+
+//	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData)){
+//		  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+//		  HAL_Delay(300); // Blink every 500 ms;
 //
-//uint32_t TxMailbox; //code is not needed
+//	}
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_PIN){
-	if (GPIO_PIN == GPIO_PIN_13){
-		TxData[0] = 100; // 100 ms delay
-		TxData[1] = 10; // loop repeat 10 times
+	HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, RxData);
 
-		HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData);
-	}
+
+	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	//HAL_Delay(300); // Blink every 500 ms
+
 }
 
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs){
-
-//	HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef, FDCAN_RX_FIFO0, &RxHeader, RxData);
-	HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData);
-	if (RxHeader.DataLength == FDCAN_DLC_BYTES_2){
-		// If the message is for LED blink, process it
-		        if (RxData[0] == 1) { // Check command
-		            datacheck = 1; // Set flag to indicate to blink LED
-		        }
-	}
-}
 /* USER CODE END 0 */
 
 /**
@@ -92,10 +104,8 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
 
-  /* MPU Configuration--------------------------------------------------------*/
-  MPU_Config();
+  /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -115,19 +125,49 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_FDCAN1_Init();
+  MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_FDCAN_Start(&hfdcan1);
 
-  // Activation notification:
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+  	  HAL_CAN_Start(&hcan1);
 
-  // DLC = Data Length Code
+      if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+        {
+      	  Error_Handler();
+        }
 
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
-  TxHeader.IdType = FDCAN_STANDARD_ID;
-//  TxHeader.RTR = FDCAN_NO_RTR; FDCAN does not utilize Remote Transmission Request
-  TxHeader.Identifier = 0x123; // This is the 11 bit Identifer
+  	  TxHeader.DLC = 3;  // Length of data (3 bytes)
+  	  TxHeader.ExtId = 0;
+      TxHeader.IDE = CAN_ID_STD;  // Standard ID
+      TxHeader.RTR = CAN_RTR_DATA;  // Data frame
+      TxHeader.StdId = 0x446;  // ID 2 (to match H7's filter)
+      TxHeader.TransmitGlobalTime = DISABLE;
+
+      TxData[0] = 0x23;
+      TxData[1] = 0x44;
+      TxData[2] = 0x69;
+
+      	/*  if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox[0]) != HAL_OK)
+      	  {
+      	     Error_Handler ();
+      	  }
+*/
+      CAN_FilterTypeDef canfilterconfig;
+
+      	  canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
+          canfilterconfig.FilterBank = 1; // used to specify which filter bank you are using as you can have various filters (0-13)
+          canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK; // Mask mode
+          canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT; // 32-bit filter
+          canfilterconfig.FilterIdHigh = 0x223 << 5; // Filter ID high bits
+          canfilterconfig.FilterIdLow = 0x0000; // Filter ID low bits
+          canfilterconfig.FilterMaskIdHigh = 0x00; // Mask high bits (accept all) 0x223 << 5;
+          canfilterconfig.FilterMaskIdLow = 0x0000; // Mask low bits (accept all)
+          canfilterconfig.FilterFIFOAssignment = CAN_RX_FIFO0; // Assign to FIFO0
+         // canfilterconfig.SlaveStartFilterBank = 10; // For single CAN controllers
+
+      HAL_CAN_ConfigFilter(&hcan1, &canfilterconfig);
+
+
+
 
   /* USER CODE END 2 */
 
@@ -135,18 +175,29 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+//	  	  // Test code to flash LED
+	  	  //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	      //HAL_Delay(300); // Blink every 500 ms
+
+//	  if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, &TxData[0], &TxMailbox[0]) != HAL_OK)
+//	  {
+//	     Error_Handler ();
+//	  }
+//
+//	  HAL_Delay(1000);
+
+	 if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
+		 //uint32_t can_error = HAL_CAN_GetError(&hcan1); // Can potentially use for debugging
+
+		 Error_Handler();
+	 }
+	 HAL_Delay(1000);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
-	  // RxData[1] takes the number passed from Tx[1]
-	  if (datacheck){
-		  for (int i = 0; i <= RxData[1]; i++){
-			  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-			  HAL_Delay(RxData[0]); // takes the number passed from Tx[0]
-		  }
-		  datacheck = 0;
-	  }
+
   }
   /* USER CODE END 3 */
 }
@@ -160,32 +211,32 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Supply configuration update enable
-  */
-  HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
-
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
-
-  while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 28;
-  RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 5;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 180;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
-  RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
-  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
-  RCC_OscInitStruct.PLL.PLLFRACN = 1024;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Activate the Over-Drive mode
+  */
+  if (HAL_PWREx_EnableOverDrive() != HAL_OK)
   {
     Error_Handler();
   }
@@ -193,83 +244,53 @@ void SystemClock_Config(void)
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
-                              |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
-  RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /**
-  * @brief FDCAN1 Initialization Function
+  * @brief CAN1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_FDCAN1_Init(void)
+static void MX_CAN1_Init(void)
 {
 
-  /* USER CODE BEGIN FDCAN1_Init 0 */
+  /* USER CODE BEGIN CAN1_Init 0 */
 
-  /* USER CODE END FDCAN1_Init 0 */
+  /* USER CODE END CAN1_Init 0 */
 
-  /* USER CODE BEGIN FDCAN1_Init 1 */
+  /* USER CODE BEGIN CAN1_Init 1 */
 
-  /* USER CODE END FDCAN1_Init 1 */
-  hfdcan1.Instance = FDCAN1;
-  hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
-  hfdcan1.Init.TransmitPause = DISABLE;
-  hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 6;
-  hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 10;
-  hfdcan1.Init.NominalTimeSeg2 = 4;
-  hfdcan1.Init.DataPrescaler = 1;
-  hfdcan1.Init.DataSyncJumpWidth = 1;
-  hfdcan1.Init.DataTimeSeg1 = 1;
-  hfdcan1.Init.DataTimeSeg2 = 1;
-  hfdcan1.Init.MessageRAMOffset = 0;
-  hfdcan1.Init.StdFiltersNbr = 0;
-  hfdcan1.Init.ExtFiltersNbr = 0;
-  hfdcan1.Init.RxFifo0ElmtsNbr = 0;
-  hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.RxFifo1ElmtsNbr = 0;
-  hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.RxBuffersNbr = 0;
-  hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.TxEventsNbr = 0;
-  hfdcan1.Init.TxBuffersNbr = 0;
-  hfdcan1.Init.TxFifoQueueElmtsNbr = 0;
-  hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
-  hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
-  if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
+  /* USER CODE END CAN1_Init 1 */
+  hcan1.Instance = CAN1;
+  hcan1.Init.Prescaler = 9;
+  hcan1.Init.Mode = CAN_MODE_LOOPBACK;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_7TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan1.Init.TimeTriggeredMode = DISABLE;
+  hcan1.Init.AutoBusOff = DISABLE;
+  hcan1.Init.AutoWakeUp = DISABLE;
+  hcan1.Init.AutoRetransmission = DISABLE;
+  hcan1.Init.ReceiveFifoLocked = DISABLE;
+  hcan1.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN FDCAN1_Init 2 */
+  /* USER CODE BEGIN CAN1_Init 2 */
 
-  FDCAN_FilterTypeDef fdcanfilterconfig;
 
-  fdcanfilterconfig.IdType = FDCAN_STANDARD_ID; // Use standard ID
-  fdcanfilterconfig.FilterIndex = 0; // First filter
-  fdcanfilterconfig.FilterType = FDCAN_FILTER_MASK; // Configure as mask filter
-  fdcanfilterconfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0; // Route to RX FIFO 0
-  fdcanfilterconfig.FilterID1 = 0x123; // ID of messages to receive (must match TxHeader.Identifier)
-  fdcanfilterconfig.FilterID2 = 0x7FF; // Mask, to accept the specified ID
-
-  HAL_FDCAN_ConfigFilter(&hfdcan1, &fdcanfilterconfig);
-
-  /* USER CODE END FDCAN1_Init 2 */
+  /* USER CODE END CAN1_Init 2 */
 
 }
 
@@ -285,26 +306,18 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PC13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  /*Configure GPIO pin : PA5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -313,35 +326,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
-
- /* MPU Configuration */
-
-void MPU_Config(void)
-{
-  MPU_Region_InitTypeDef MPU_InitStruct = {0};
-
-  /* Disables the MPU */
-  HAL_MPU_Disable();
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
-  MPU_InitStruct.BaseAddress = 0x0;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_4GB;
-  MPU_InitStruct.SubRegionDisable = 0x87;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  /* Enables the MPU */
-  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.
